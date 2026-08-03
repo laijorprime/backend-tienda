@@ -1,13 +1,14 @@
 {
   "name": "backend-tienda",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "API para tienda de utensilios de repostería",
+  "main": "server.js",
   "scripts": {
+    "start": "node server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["api", "reposteria", "utensilios"],
+  "author": "Tu Nombre",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
