@@ -109,9 +109,7 @@ async function conectarDB() {
         console.log('✅ Conectado a PostgreSQL en Railway');
         
         // Mostrar información de conexión (versión corregida)
-        const host = client.options?.host || 'desconocido';
-        const port = client.options?.port || 'desconocido';
-        console.log(`📍 Host: ${host}:${port}`);
+console.log(`📍 Host: ${process.env.DB_HOST || 'sakura.proxy.rlwy.net'}:${process.env.DB_PORT || 12125}`);
         
         await crearTablas();
     } catch (error) {
