@@ -6,6 +6,8 @@ const express = require('express');
 const { Client } = require('pg');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const cloudinary = require('cloudinary').v2;
+const { upload } = require('./config/cloudinary');
 require('dotenv').config();
 
 const app = express();
@@ -55,7 +57,7 @@ async function crearTablas() {
                 categoria VARCHAR(50) NOT NULL,
                 precio DECIMAL(10,2) NOT NULL,
                 stock INTEGER DEFAULT 0,
-                imagen VARCHAR(100),
+                imagen VARCHAR(500),
                 descripcion TEXT,
                 creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
@@ -113,10 +115,10 @@ async function crearTablas() {
             await client.query(`
                 INSERT INTO productos (nombre, categoria, precio, stock, imagen, descripcion)
                 VALUES 
-                    ('Batidora Planetaria 5L', 'batidoras', 890.00, 10, 'batidora-planetaria.jpg', 'Ideal para masas pesadas. Incluye 3 accesorios.'),
-                    ('Set de Moldes Desmontables', 'moldes', 120.00, 25, 'moldes-desmontables.jpg', 'Pack de 3 moldes de 20, 24 y 28 cm.'),
-                    ('Manga Pastelera + 12 Boquillas', 'decoracion', 85.00, 15, 'manga-pastelera.jpg', 'Set completo para decoración profesional.'),
-                    ('Batidora de Mano 600W', 'batidoras', 230.00, 8, 'batidora-mano.jpg', 'Turbo + 5 velocidades. Incluye batidores y gancho.')
+                    ('Batidora Planetaria 5L', 'batidoras', 890.00, 10, 'https://res.cloudinary.com/demo/image/upload/v1/tienda-utensilios/batidora-planetaria.jpg', 'Ideal para masas pesadas. Incluye 3 accesorios.'),
+                    ('Set de Moldes Desmontables', 'moldes', 120.00, 25, 'https://res.cloudinary.com/demo/image/upload/v1/tienda-utensilios/moldes-desmontables.jpg', 'Pack de 3 moldes de 20, 24 y 28 cm.'),
+                    ('Manga Pastelera + 12 Boquillas', 'decoracion', 85.00, 15, 'https://res.cloudinary.com/demo/image/upload/v1/tienda-utensilios/manga-pastelera.jpg', 'Set completo para decoración profesional.'),
+                    ('Batidora de Mano 600W', 'batidoras', 230.00, 8, 'https://res.cloudinary.com/demo/image/upload/v1/tienda-utensilios/batidora-mano.jpg', 'Turbo + 5 velocidades. Incluye batidores y gancho.')
             `);
             console.log('✅ Productos de ejemplo insertados');
         }
@@ -184,7 +186,6 @@ app.post('/api/auth/registro', async (req, res) => {
     try {
         const { nombre, email, password, telefono, direccion } = req.body;
         
-        // Validar campos obligatorios
         if (!nombre || !email || !password) {
             return res.status(400).json({
                 exito: false,
@@ -192,7 +193,6 @@ app.post('/api/auth/registro', async (req, res) => {
             });
         }
         
-        // Verificar si el email ya existe
         const existingUser = await client.query('SELECT * FROM usuarios WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
             return res.status(400).json({
@@ -201,11 +201,9 @@ app.post('/api/auth/registro', async (req, res) => {
             });
         }
         
-        // Encriptar contraseña
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
         
-        // Guardar usuario en la base de datos
         const result = await client.query(`
             INSERT INTO usuarios (nombre, email, password, telefono, direccion)
             VALUES ($1, $2, $3, $4, $5)
@@ -214,7 +212,6 @@ app.post('/api/auth/registro', async (req, res) => {
         
         const usuario = result.rows[0];
         
-        // Generar token JWT
         const token = jwt.sign(
             { id: usuario.id, email: usuario.email, rol: usuario.rol },
             SECRET_KEY,
@@ -252,7 +249,6 @@ app.post('/api/auth/login', async (req, res) => {
             });
         }
         
-        // Buscar usuario por email
         const result = await client.query('SELECT * FROM usuarios WHERE email = $1', [email]);
         if (result.rows.length === 0) {
             return res.status(401).json({
@@ -263,7 +259,6 @@ app.post('/api/auth/login', async (req, res) => {
         
         const usuario = result.rows[0];
         
-        // Verificar contraseña
         const passwordValido = await bcrypt.compare(password, usuario.password);
         if (!passwordValido) {
             return res.status(401).json({
@@ -272,7 +267,6 @@ app.post('/api/auth/login', async (req, res) => {
             });
         }
         
-        // Generar token JWT
         const token = jwt.sign(
             { id: usuario.id, email: usuario.email, rol: usuario.rol },
             SECRET_KEY,
@@ -349,16 +343,17 @@ app.get('/api/auth/mis-pedidos', verificarToken, async (req, res) => {
 
 // ============ ENDPOINTS DE PRODUCTOS ============
 
-// 1. Ruta principal
+// Ruta principal
 app.get('/', (req, res) => {
     res.json({
         mensaje: '🍰 API de Tienda de Utensilios - ReposteriaShop',
         version: '1.0.0',
-        base_datos: 'PostgreSQL en Railway'
+        base_datos: 'PostgreSQL en Railway',
+        imagenes: 'Cloudinary'
     });
 });
 
-// 2. Obtener todos los productos
+// Obtener todos los productos
 app.get('/api/productos', async (req, res) => {
     try {
         const result = await client.query('SELECT * FROM productos ORDER BY id');
@@ -373,7 +368,7 @@ app.get('/api/productos', async (req, res) => {
     }
 });
 
-// 3. Obtener un producto por ID
+// Obtener un producto por ID
 app.get('/api/productos/:id', async (req, res) => {
     try {
         const id = parseInt(req.params.id);
@@ -390,7 +385,7 @@ app.get('/api/productos/:id', async (req, res) => {
     }
 });
 
-// 4. Obtener productos por categoría
+// Obtener productos por categoría
 app.get('/api/productos/categoria/:categoria', async (req, res) => {
     try {
         const categoria = req.params.categoria;
@@ -418,9 +413,17 @@ app.get('/api/productos/categoria/:categoria', async (req, res) => {
     }
 });
 
-// 5. Crear un nuevo producto (POST) - Solo admin
-app.post('/api/productos', async (req, res) => {
+// Crear un nuevo producto (POST) - Solo admin
+app.post('/api/productos', verificarToken, async (req, res) => {
     try {
+        // Verificar si es admin
+        if (req.usuario.rol !== 'admin') {
+            return res.status(403).json({
+                exito: false,
+                mensaje: 'No tienes permisos para crear productos'
+            });
+        }
+        
         const { nombre, categoria, precio, stock, imagen, descripcion } = req.body;
         
         if (!nombre || !categoria || !precio) {
@@ -447,9 +450,17 @@ app.post('/api/productos', async (req, res) => {
     }
 });
 
-// 6. Actualizar producto (PUT) - Solo admin
-app.put('/api/productos/:id', async (req, res) => {
+// Actualizar producto (PUT) - Solo admin
+app.put('/api/productos/:id', verificarToken, async (req, res) => {
     try {
+        // Verificar si es admin
+        if (req.usuario.rol !== 'admin') {
+            return res.status(403).json({
+                exito: false,
+                mensaje: 'No tienes permisos para actualizar productos'
+            });
+        }
+        
         const id = parseInt(req.params.id);
         const { nombre, categoria, precio, stock, imagen, descripcion } = req.body;
         
@@ -493,9 +504,17 @@ app.put('/api/productos/:id', async (req, res) => {
     }
 });
 
-// 7. Eliminar producto (DELETE) - Solo admin
-app.delete('/api/productos/:id', async (req, res) => {
+// Eliminar producto (DELETE) - Solo admin
+app.delete('/api/productos/:id', verificarToken, async (req, res) => {
     try {
+        // Verificar si es admin
+        if (req.usuario.rol !== 'admin') {
+            return res.status(403).json({
+                exito: false,
+                mensaje: 'No tienes permisos para eliminar productos'
+            });
+        }
+        
         const id = parseInt(req.params.id);
         
         const checkResult = await client.query('SELECT * FROM productos WHERE id = $1', [id]);
@@ -521,9 +540,82 @@ app.delete('/api/productos/:id', async (req, res) => {
     }
 });
 
+// ============ ENDPOINTS DE IMÁGENES (Cloudinary) ============
+
+// Subir imagen a Cloudinary
+app.post('/api/upload', verificarToken, upload.single('imagen'), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({
+                exito: false,
+                mensaje: 'No se recibió ninguna imagen'
+            });
+        }
+        
+        // Solo administradores pueden subir imágenes
+        if (req.usuario.rol !== 'admin') {
+            return res.status(403).json({
+                exito: false,
+                mensaje: 'No tienes permisos para subir imágenes'
+            });
+        }
+        
+        res.json({
+            exito: true,
+            mensaje: 'Imagen subida exitosamente',
+            imagen: {
+                url: req.file.path,
+                public_id: req.file.filename,
+                secure_url: req.file.path
+            }
+        });
+    } catch (error) {
+        console.error('Error al subir imagen:', error);
+        res.status(500).json({
+            exito: false,
+            mensaje: 'Error al subir la imagen: ' + error.message
+        });
+    }
+});
+
+// Eliminar imagen de Cloudinary
+app.delete('/api/upload/:public_id', verificarToken, async (req, res) => {
+    try {
+        const public_id = req.params.public_id;
+        
+        // Solo administradores pueden eliminar imágenes
+        if (req.usuario.rol !== 'admin') {
+            return res.status(403).json({
+                exito: false,
+                mensaje: 'No tienes permisos para eliminar imágenes'
+            });
+        }
+        
+        const result = await cloudinary.uploader.destroy(public_id);
+        
+        if (result.result === 'ok') {
+            res.json({
+                exito: true,
+                mensaje: 'Imagen eliminada correctamente'
+            });
+        } else {
+            res.status(404).json({
+                exito: false,
+                mensaje: 'Imagen no encontrada'
+            });
+        }
+    } catch (error) {
+        console.error('Error al eliminar imagen:', error);
+        res.status(500).json({
+            exito: false,
+            mensaje: 'Error al eliminar la imagen'
+        });
+    }
+});
+
 // ============ ENDPOINTS DE PEDIDOS ============
 
-// 8. Guardar un pedido (versión pública - sin autenticación)
+// Guardar un pedido (versión pública - sin autenticación)
 app.post('/api/pedidos', async (req, res) => {
     try {
         const { cliente, productos: productosPedido, total } = req.body;
@@ -563,13 +655,12 @@ app.post('/api/pedidos', async (req, res) => {
     }
 });
 
-// 9. Guardar un pedido (versión autenticada - con usuario_id)
+// Guardar un pedido (versión autenticada - con usuario_id)
 app.post('/api/pedidos/protegido', verificarToken, async (req, res) => {
     try {
         const { productos: productosPedido, total } = req.body;
         const usuarioId = req.usuario.id;
         
-        // Obtener datos del usuario
         const userResult = await client.query(
             'SELECT nombre, email, telefono FROM usuarios WHERE id = $1',
             [usuarioId]
@@ -581,7 +672,6 @@ app.post('/api/pedidos/protegido', verificarToken, async (req, res) => {
         
         const usuario = userResult.rows[0];
         
-        // Guardar el pedido asociado al usuario
         const pedidoResult = await client.query(`
             INSERT INTO pedidos (cliente_nombre, cliente_email, cliente_telefono, total, usuario_id)
             VALUES ($1, $2, $3, $4, $5)
@@ -590,7 +680,6 @@ app.post('/api/pedidos/protegido', verificarToken, async (req, res) => {
         
         const pedido = pedidoResult.rows[0];
         
-        // Insertar detalles del pedido
         for (const item of productosPedido) {
             await client.query(`
                 INSERT INTO pedido_detalles (pedido_id, producto_id, cantidad, precio_unitario)
@@ -611,9 +700,16 @@ app.post('/api/pedidos/protegido', verificarToken, async (req, res) => {
     }
 });
 
-// 10. Obtener todos los pedidos (solo admin)
-app.get('/api/pedidos', async (req, res) => {
+// Obtener todos los pedidos (solo admin)
+app.get('/api/pedidos', verificarToken, async (req, res) => {
     try {
+        if (req.usuario.rol !== 'admin') {
+            return res.status(403).json({
+                exito: false,
+                mensaje: 'No tienes permisos para ver pedidos'
+            });
+        }
+        
         const result = await client.query(`
             SELECT p.*, 
                    COALESCE(json_agg(
@@ -640,7 +736,7 @@ app.get('/api/pedidos', async (req, res) => {
     }
 });
 
-// 11. Ruta 404
+// ============ RUTA 404 ============
 app.use((req, res) => {
     res.status(404).json({
         exito: false,
@@ -658,6 +754,7 @@ conectarDB().then(() => {
         console.log(`✅ Servidor corriendo en puerto: ${PORT}`);
         console.log('✅ PostgreSQL conectado');
         console.log('✅ Autenticación JWT activa');
+        console.log('✅ Cloudinary configurado para imágenes');
         console.log('='.repeat(50));
     });
 }).catch(error => {
