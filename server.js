@@ -158,7 +158,7 @@ async function conectarDB() {
 
 function verificarToken(req, res, next) {
     const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1]; // "Bearer TOKEN"
+    const token = authHeader && authHeader.split(' ')[1];
     
     if (!token) {
         return res.status(401).json({
@@ -416,7 +416,6 @@ app.get('/api/productos/categoria/:categoria', async (req, res) => {
 // Crear un nuevo producto (POST) - Solo admin
 app.post('/api/productos', verificarToken, async (req, res) => {
     try {
-        // Verificar si es admin
         if (req.usuario.rol !== 'admin') {
             return res.status(403).json({
                 exito: false,
@@ -453,7 +452,6 @@ app.post('/api/productos', verificarToken, async (req, res) => {
 // Actualizar producto (PUT) - Solo admin
 app.put('/api/productos/:id', verificarToken, async (req, res) => {
     try {
-        // Verificar si es admin
         if (req.usuario.rol !== 'admin') {
             return res.status(403).json({
                 exito: false,
@@ -507,7 +505,6 @@ app.put('/api/productos/:id', verificarToken, async (req, res) => {
 // Eliminar producto (DELETE) - Solo admin
 app.delete('/api/productos/:id', verificarToken, async (req, res) => {
     try {
-        // Verificar si es admin
         if (req.usuario.rol !== 'admin') {
             return res.status(403).json({
                 exito: false,
@@ -552,7 +549,6 @@ app.post('/api/upload', verificarToken, upload.single('imagen'), async (req, res
             });
         }
         
-        // Solo administradores pueden subir imágenes
         if (req.usuario.rol !== 'admin') {
             return res.status(403).json({
                 exito: false,
@@ -583,7 +579,6 @@ app.delete('/api/upload/:public_id', verificarToken, async (req, res) => {
     try {
         const public_id = req.params.public_id;
         
-        // Solo administradores pueden eliminar imágenes
         if (req.usuario.rol !== 'admin') {
             return res.status(403).json({
                 exito: false,
