@@ -4,12 +4,17 @@
 
 const express = require('express');
 const { Client } = require('pg');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 const app = express();
 
 // ============ PUERTO DINÁMICO ============
 const PORT = process.env.PORT || 3000;
+
+// ============ CLAVE SECRETA PARA JWT ============
+const SECRET_KEY = process.env.JWT_SECRET || 'mi_clave_secreta_para_jwt_2026';
 
 // Middleware para procesar JSON
 app.use(express.json());
@@ -42,6 +47,7 @@ const client = new Client({
 
 async function crearTablas() {
     try {
+        // Tabla de productos
         await client.query(`
             CREATE TABLE IF NOT EXISTS productos (
                 id SERIAL PRIMARY KEY,
@@ -56,9 +62,26 @@ async function crearTablas() {
         `);
         console.log('✅ Tabla "productos" verificada');
 
+        // Tabla de usuarios
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id SERIAL PRIMARY KEY,
+                nombre VARCHAR(100) NOT NULL,
+                email VARCHAR(100) UNIQUE NOT NULL,
+                password VARCHAR(255) NOT NULL,
+                telefono VARCHAR(20),
+                direccion TEXT,
+                rol VARCHAR(20) DEFAULT 'cliente',
+                creado_en TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+        console.log('✅ Tabla "usuarios" verificada');
+
+        // Tabla de pedidos (con usuario_id)
         await client.query(`
             CREATE TABLE IF NOT EXISTS pedidos (
                 id SERIAL PRIMARY KEY,
+                usuario_id INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
                 cliente_nombre VARCHAR(100) NOT NULL,
                 cliente_email VARCHAR(100) NOT NULL,
                 cliente_telefono VARCHAR(20),
@@ -69,6 +92,7 @@ async function crearTablas() {
         `);
         console.log('✅ Tabla "pedidos" verificada');
 
+        // Tabla de detalles del pedido
         await client.query(`
             CREATE TABLE IF NOT EXISTS pedido_detalles (
                 id SERIAL PRIMARY KEY,
@@ -80,6 +104,7 @@ async function crearTablas() {
         `);
         console.log('✅ Tabla "pedido_detalles" verificada');
 
+        // Insertar productos de ejemplo si no hay
         const resultado = await client.query('SELECT COUNT(*) FROM productos');
         const count = parseInt(resultado.rows[0].count);
         
@@ -94,6 +119,17 @@ async function crearTablas() {
                     ('Batidora de Mano 600W', 'batidoras', 230.00, 8, 'batidora-mano.jpg', 'Turbo + 5 velocidades. Incluye batidores y gancho.')
             `);
             console.log('✅ Productos de ejemplo insertados');
+        }
+
+        // Insertar usuario administrador si no existe
+        const adminCheck = await client.query('SELECT * FROM usuarios WHERE email = $1', ['admin@reposteriashop.com']);
+        if (adminCheck.rows.length === 0) {
+            const hashedPassword = await bcrypt.hash('admin123', 10);
+            await client.query(`
+                INSERT INTO usuarios (nombre, email, password, rol)
+                VALUES ($1, $2, $3, $4)
+            `, ['Administrador', 'admin@reposteriashop.com', hashedPassword, 'admin']);
+            console.log('✅ Usuario administrador creado (admin@reposteriashop.com / admin123)');
         }
 
     } catch (error) {
@@ -116,7 +152,202 @@ async function conectarDB() {
     }
 }
 
-// ============ ENDPOINTS (RUTAS) ============
+// ============ MIDDLEWARE DE AUTENTICACIÓN ============
+
+function verificarToken(req, res, next) {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1]; // "Bearer TOKEN"
+    
+    if (!token) {
+        return res.status(401).json({
+            exito: false,
+            mensaje: 'Acceso denegado. Token no proporcionado.'
+        });
+    }
+    
+    try {
+        const decoded = jwt.verify(token, SECRET_KEY);
+        req.usuario = decoded;
+        next();
+    } catch (error) {
+        return res.status(403).json({
+            exito: false,
+            mensaje: 'Token inválido o expirado'
+        });
+    }
+}
+
+// ============ ENDPOINTS DE AUTENTICACIÓN ============
+
+// 1. Registro de usuario
+app.post('/api/auth/registro', async (req, res) => {
+    try {
+        const { nombre, email, password, telefono, direccion } = req.body;
+        
+        // Validar campos obligatorios
+        if (!nombre || !email || !password) {
+            return res.status(400).json({
+                exito: false,
+                mensaje: 'Faltan campos obligatorios: nombre, email, password'
+            });
+        }
+        
+        // Verificar si el email ya existe
+        const existingUser = await client.query('SELECT * FROM usuarios WHERE email = $1', [email]);
+        if (existingUser.rows.length > 0) {
+            return res.status(400).json({
+                exito: false,
+                mensaje: 'Este email ya está registrado'
+            });
+        }
+        
+        // Encriptar contraseña
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+        
+        // Guardar usuario en la base de datos
+        const result = await client.query(`
+            INSERT INTO usuarios (nombre, email, password, telefono, direccion)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, nombre, email, telefono, direccion, rol, creado_en
+        `, [nombre, email, hashedPassword, telefono || '', direccion || '']);
+        
+        const usuario = result.rows[0];
+        
+        // Generar token JWT
+        const token = jwt.sign(
+            { id: usuario.id, email: usuario.email, rol: usuario.rol },
+            SECRET_KEY,
+            { expiresIn: '7d' }
+        );
+        
+        res.status(201).json({
+            exito: true,
+            mensaje: 'Usuario registrado exitosamente',
+            token: token,
+            usuario: {
+                id: usuario.id,
+                nombre: usuario.nombre,
+                email: usuario.email,
+                telefono: usuario.telefono,
+                direccion: usuario.direccion,
+                rol: usuario.rol
+            }
+        });
+    } catch (error) {
+        console.error('Error al registrar usuario:', error);
+        res.status(500).json({ exito: false, mensaje: 'Error al registrar usuario' });
+    }
+});
+
+// 2. Inicio de sesión
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        
+        if (!email || !password) {
+            return res.status(400).json({
+                exito: false,
+                mensaje: 'Email y contraseña son obligatorios'
+            });
+        }
+        
+        // Buscar usuario por email
+        const result = await client.query('SELECT * FROM usuarios WHERE email = $1', [email]);
+        if (result.rows.length === 0) {
+            return res.status(401).json({
+                exito: false,
+                mensaje: 'Credenciales incorrectas'
+            });
+        }
+        
+        const usuario = result.rows[0];
+        
+        // Verificar contraseña
+        const passwordValido = await bcrypt.compare(password, usuario.password);
+        if (!passwordValido) {
+            return res.status(401).json({
+                exito: false,
+                mensaje: 'Credenciales incorrectas'
+            });
+        }
+        
+        // Generar token JWT
+        const token = jwt.sign(
+            { id: usuario.id, email: usuario.email, rol: usuario.rol },
+            SECRET_KEY,
+            { expiresIn: '7d' }
+        );
+        
+        res.json({
+            exito: true,
+            mensaje: 'Inicio de sesión exitoso',
+            token: token,
+            usuario: {
+                id: usuario.id,
+                nombre: usuario.nombre,
+                email: usuario.email,
+                telefono: usuario.telefono,
+                direccion: usuario.direccion,
+                rol: usuario.rol
+            }
+        });
+    } catch (error) {
+        console.error('Error al iniciar sesión:', error);
+        res.status(500).json({ exito: false, mensaje: 'Error al iniciar sesión' });
+    }
+});
+
+// 3. Obtener perfil del usuario (protegido)
+app.get('/api/auth/perfil', verificarToken, async (req, res) => {
+    try {
+        const result = await client.query(
+            'SELECT id, nombre, email, telefono, direccion, rol, creado_en FROM usuarios WHERE id = $1',
+            [req.usuario.id]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ exito: false, mensaje: 'Usuario no encontrado' });
+        }
+        
+        res.json({ exito: true, usuario: result.rows[0] });
+    } catch (error) {
+        console.error('Error al obtener perfil:', error);
+        res.status(500).json({ exito: false, mensaje: 'Error al obtener perfil' });
+    }
+});
+
+// 4. Obtener pedidos del usuario (protegido)
+app.get('/api/auth/mis-pedidos', verificarToken, async (req, res) => {
+    try {
+        const result = await client.query(`
+            SELECT p.*, 
+                   COALESCE(json_agg(
+                       json_build_object(
+                           'producto_id', pd.producto_id,
+                           'cantidad', pd.cantidad,
+                           'precio_unitario', pd.precio_unitario
+                       )
+                   ) FILTER (WHERE pd.producto_id IS NOT NULL), '[]') as detalles
+            FROM pedidos p
+            LEFT JOIN pedido_detalles pd ON p.id = pd.pedido_id
+            WHERE p.usuario_id = $1
+            GROUP BY p.id
+            ORDER BY p.fecha DESC
+        `, [req.usuario.id]);
+        
+        res.json({
+            exito: true,
+            cantidad: result.rows.length,
+            pedidos: result.rows
+        });
+    } catch (error) {
+        console.error('Error al obtener pedidos del usuario:', error);
+        res.status(500).json({ exito: false, mensaje: 'Error al obtener pedidos' });
+    }
+});
+
+// ============ ENDPOINTS DE PRODUCTOS ============
 
 // 1. Ruta principal
 app.get('/', (req, res) => {
@@ -187,7 +418,7 @@ app.get('/api/productos/categoria/:categoria', async (req, res) => {
     }
 });
 
-// 5. Crear un nuevo producto (POST)
+// 5. Crear un nuevo producto (POST) - Solo admin
 app.post('/api/productos', async (req, res) => {
     try {
         const { nombre, categoria, precio, stock, imagen, descripcion } = req.body;
@@ -216,13 +447,12 @@ app.post('/api/productos', async (req, res) => {
     }
 });
 
-// ============ RUTA PUT (ACTUALIZAR PRODUCTO) ============
+// 6. Actualizar producto (PUT) - Solo admin
 app.put('/api/productos/:id', async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const { nombre, categoria, precio, stock, imagen, descripcion } = req.body;
         
-        // Validar campos obligatorios
         if (!nombre || !categoria || !precio) {
             return res.status(400).json({
                 exito: false,
@@ -263,12 +493,11 @@ app.put('/api/productos/:id', async (req, res) => {
     }
 });
 
-// ============ RUTA DELETE (ELIMINAR PRODUCTO) ============
+// 7. Eliminar producto (DELETE) - Solo admin
 app.delete('/api/productos/:id', async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         
-        // Primero verificar si el producto existe
         const checkResult = await client.query('SELECT * FROM productos WHERE id = $1', [id]);
         if (checkResult.rows.length === 0) {
             return res.status(404).json({
@@ -277,7 +506,6 @@ app.delete('/api/productos/:id', async (req, res) => {
             });
         }
         
-        // Eliminar el producto (los detalles de pedidos se eliminarán en cascada)
         await client.query('DELETE FROM productos WHERE id = $1', [id]);
         
         res.json({
@@ -293,7 +521,9 @@ app.delete('/api/productos/:id', async (req, res) => {
     }
 });
 
-// 6. Guardar un pedido
+// ============ ENDPOINTS DE PEDIDOS ============
+
+// 8. Guardar un pedido (versión pública - sin autenticación)
 app.post('/api/pedidos', async (req, res) => {
     try {
         const { cliente, productos: productosPedido, total } = req.body;
@@ -333,7 +563,55 @@ app.post('/api/pedidos', async (req, res) => {
     }
 });
 
-// 7. Obtener todos los pedidos
+// 9. Guardar un pedido (versión autenticada - con usuario_id)
+app.post('/api/pedidos/protegido', verificarToken, async (req, res) => {
+    try {
+        const { productos: productosPedido, total } = req.body;
+        const usuarioId = req.usuario.id;
+        
+        // Obtener datos del usuario
+        const userResult = await client.query(
+            'SELECT nombre, email, telefono FROM usuarios WHERE id = $1',
+            [usuarioId]
+        );
+        
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ exito: false, mensaje: 'Usuario no encontrado' });
+        }
+        
+        const usuario = userResult.rows[0];
+        
+        // Guardar el pedido asociado al usuario
+        const pedidoResult = await client.query(`
+            INSERT INTO pedidos (cliente_nombre, cliente_email, cliente_telefono, total, usuario_id)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING *
+        `, [usuario.nombre, usuario.email, usuario.telefono, total || 0, usuarioId]);
+        
+        const pedido = pedidoResult.rows[0];
+        
+        // Insertar detalles del pedido
+        for (const item of productosPedido) {
+            await client.query(`
+                INSERT INTO pedido_detalles (pedido_id, producto_id, cantidad, precio_unitario)
+                VALUES ($1, $2, $3, $4)
+            `, [pedido.id, item.id, item.cantidad, item.precio]);
+        }
+        
+        console.log('📦 Nuevo pedido guardado para usuario:', usuarioId);
+        
+        res.status(201).json({
+            exito: true,
+            mensaje: 'Pedido guardado exitosamente',
+            pedido: pedido
+        });
+    } catch (error) {
+        console.error('Error al guardar pedido:', error);
+        res.status(500).json({ exito: false, mensaje: 'Error al guardar pedido' });
+    }
+});
+
+// 10. Obtener todos los pedidos (solo admin)
 app.get('/api/pedidos', async (req, res) => {
     try {
         const result = await client.query(`
@@ -362,7 +640,7 @@ app.get('/api/pedidos', async (req, res) => {
     }
 });
 
-// 8. Ruta 404
+// 11. Ruta 404
 app.use((req, res) => {
     res.status(404).json({
         exito: false,
@@ -379,6 +657,7 @@ conectarDB().then(() => {
         console.log('='.repeat(50));
         console.log(`✅ Servidor corriendo en puerto: ${PORT}`);
         console.log('✅ PostgreSQL conectado');
+        console.log('✅ Autenticación JWT activa');
         console.log('='.repeat(50));
     });
 }).catch(error => {
