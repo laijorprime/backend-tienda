@@ -27,7 +27,6 @@ app.use((req, res, next) => {
 
 // ============ CONEXIÓN A POSTGRESQL ============
 
-// Usar la URL completa que proporciona Railway o variables individuales
 const client = new Client({
     host: process.env.DB_HOST || 'sakura.proxy.rlwy.net',
     port: process.env.DB_PORT || 12125,
@@ -35,7 +34,7 @@ const client = new Client({
     password: process.env.DB_PASSWORD || 'pMNtzvpcNHcWaVdEDEZYBkNtCYQxiPMa',
     database: process.env.DB_NAME || 'railway',
     ssl: {
-        rejectUnauthorized: false // Necesario para Railway
+        rejectUnauthorized: false
     }
 });
 
@@ -43,7 +42,6 @@ const client = new Client({
 
 async function crearTablas() {
     try {
-        // Tabla de productos
         await client.query(`
             CREATE TABLE IF NOT EXISTS productos (
                 id SERIAL PRIMARY KEY,
@@ -58,7 +56,6 @@ async function crearTablas() {
         `);
         console.log('✅ Tabla "productos" verificada');
 
-        // Tabla de pedidos
         await client.query(`
             CREATE TABLE IF NOT EXISTS pedidos (
                 id SERIAL PRIMARY KEY,
@@ -72,7 +69,6 @@ async function crearTablas() {
         `);
         console.log('✅ Tabla "pedidos" verificada');
 
-        // Tabla de detalles del pedido
         await client.query(`
             CREATE TABLE IF NOT EXISTS pedido_detalles (
                 id SERIAL PRIMARY KEY,
@@ -84,7 +80,6 @@ async function crearTablas() {
         `);
         console.log('✅ Tabla "pedido_detalles" verificada');
 
-        // Insertar productos de ejemplo si no hay
         const resultado = await client.query('SELECT COUNT(*) FROM productos');
         const count = parseInt(resultado.rows[0].count);
         
@@ -112,7 +107,11 @@ async function conectarDB() {
     try {
         await client.connect();
         console.log('✅ Conectado a PostgreSQL en Railway');
-        console.log(`📍 Host: ${client.config.host}:${client.config.port}`);
+        
+        // Mostrar información de conexión (versión corregida)
+        const host = client.options?.host || 'desconocido';
+        const port = client.options?.port || 'desconocido';
+        console.log(`📍 Host: ${host}:${port}`);
         
         await crearTablas();
     } catch (error) {
@@ -124,7 +123,6 @@ async function conectarDB() {
 
 // ============ ENDPOINTS (RUTAS) ============
 
-// 1. Ruta principal
 app.get('/', (req, res) => {
     res.json({
         mensaje: '🍰 API de Tienda de Utensilios - ReposteriaShop',
@@ -133,7 +131,6 @@ app.get('/', (req, res) => {
     });
 });
 
-// 2. Obtener todos los productos
 app.get('/api/productos', async (req, res) => {
     try {
         const result = await client.query('SELECT * FROM productos ORDER BY id');
@@ -148,7 +145,6 @@ app.get('/api/productos', async (req, res) => {
     }
 });
 
-// 3. Obtener un producto por ID
 app.get('/api/productos/:id', async (req, res) => {
     try {
         const id = parseInt(req.params.id);
@@ -165,7 +161,6 @@ app.get('/api/productos/:id', async (req, res) => {
     }
 });
 
-// 4. Obtener productos por categoría
 app.get('/api/productos/categoria/:categoria', async (req, res) => {
     try {
         const categoria = req.params.categoria;
@@ -193,7 +188,6 @@ app.get('/api/productos/categoria/:categoria', async (req, res) => {
     }
 });
 
-// 5. Crear un nuevo producto (POST)
 app.post('/api/productos', async (req, res) => {
     try {
         const { nombre, categoria, precio, stock, imagen, descripcion } = req.body;
@@ -222,7 +216,6 @@ app.post('/api/productos', async (req, res) => {
     }
 });
 
-// 6. Guardar un pedido
 app.post('/api/pedidos', async (req, res) => {
     try {
         const { cliente, productos: productosPedido, total } = req.body;
@@ -234,7 +227,6 @@ app.post('/api/pedidos', async (req, res) => {
             });
         }
         
-        // Insertar el pedido
         const pedidoResult = await client.query(`
             INSERT INTO pedidos (cliente_nombre, cliente_email, cliente_telefono, total)
             VALUES ($1, $2, $3, $4)
@@ -243,7 +235,6 @@ app.post('/api/pedidos', async (req, res) => {
         
         const pedido = pedidoResult.rows[0];
         
-        // Insertar los detalles del pedido
         for (const item of productosPedido) {
             await client.query(`
                 INSERT INTO pedido_detalles (pedido_id, producto_id, cantidad, precio_unitario)
@@ -264,7 +255,6 @@ app.post('/api/pedidos', async (req, res) => {
     }
 });
 
-// 7. Obtener todos los pedidos
 app.get('/api/pedidos', async (req, res) => {
     try {
         const result = await client.query(`
@@ -293,7 +283,6 @@ app.get('/api/pedidos', async (req, res) => {
     }
 });
 
-// 8. Ruta 404
 app.use((req, res) => {
     res.status(404).json({
         exito: false,
