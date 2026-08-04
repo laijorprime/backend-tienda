@@ -107,10 +107,7 @@ async function conectarDB() {
     try {
         await client.connect();
         console.log('✅ Conectado a PostgreSQL en Railway');
-        
-        // Mostrar información de conexión (versión corregida)
-console.log(`📍 Host: ${process.env.DB_HOST || 'sakura.proxy.rlwy.net'}:${process.env.DB_PORT || 12125}`);
-        
+        console.log(`📍 Host: ${process.env.DB_HOST || 'sakura.proxy.rlwy.net'}:${process.env.DB_PORT || 12125}`);
         await crearTablas();
     } catch (error) {
         console.error('❌ Error al conectar a PostgreSQL:', error.message);
@@ -121,6 +118,7 @@ console.log(`📍 Host: ${process.env.DB_HOST || 'sakura.proxy.rlwy.net'}:${proc
 
 // ============ ENDPOINTS (RUTAS) ============
 
+// 1. Ruta principal
 app.get('/', (req, res) => {
     res.json({
         mensaje: '🍰 API de Tienda de Utensilios - ReposteriaShop',
@@ -129,6 +127,7 @@ app.get('/', (req, res) => {
     });
 });
 
+// 2. Obtener todos los productos
 app.get('/api/productos', async (req, res) => {
     try {
         const result = await client.query('SELECT * FROM productos ORDER BY id');
@@ -143,6 +142,7 @@ app.get('/api/productos', async (req, res) => {
     }
 });
 
+// 3. Obtener un producto por ID
 app.get('/api/productos/:id', async (req, res) => {
     try {
         const id = parseInt(req.params.id);
@@ -159,6 +159,7 @@ app.get('/api/productos/:id', async (req, res) => {
     }
 });
 
+// 4. Obtener productos por categoría
 app.get('/api/productos/categoria/:categoria', async (req, res) => {
     try {
         const categoria = req.params.categoria;
@@ -186,6 +187,7 @@ app.get('/api/productos/categoria/:categoria', async (req, res) => {
     }
 });
 
+// 5. Crear un nuevo producto (POST)
 app.post('/api/productos', async (req, res) => {
     try {
         const { nombre, categoria, precio, stock, imagen, descripcion } = req.body;
@@ -214,6 +216,84 @@ app.post('/api/productos', async (req, res) => {
     }
 });
 
+// ============ RUTA PUT (ACTUALIZAR PRODUCTO) ============
+app.put('/api/productos/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const { nombre, categoria, precio, stock, imagen, descripcion } = req.body;
+        
+        // Validar campos obligatorios
+        if (!nombre || !categoria || !precio) {
+            return res.status(400).json({
+                exito: false,
+                mensaje: 'Faltan campos obligatorios: nombre, categoria, precio'
+            });
+        }
+        
+        const result = await client.query(`
+            UPDATE productos 
+            SET nombre = $1, 
+                categoria = $2, 
+                precio = $3, 
+                stock = $4, 
+                imagen = $5, 
+                descripcion = $6
+            WHERE id = $7
+            RETURNING *
+        `, [nombre, categoria, precio, stock || 0, imagen || 'default.jpg', descripcion || '', id]);
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                exito: false,
+                mensaje: `Producto con ID ${id} no encontrado`
+            });
+        }
+        
+        res.json({
+            exito: true,
+            mensaje: 'Producto actualizado correctamente',
+            producto: result.rows[0]
+        });
+    } catch (error) {
+        console.error('Error al actualizar producto:', error);
+        res.status(500).json({
+            exito: false,
+            mensaje: 'Error al actualizar producto'
+        });
+    }
+});
+
+// ============ RUTA DELETE (ELIMINAR PRODUCTO) ============
+app.delete('/api/productos/:id', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        
+        // Primero verificar si el producto existe
+        const checkResult = await client.query('SELECT * FROM productos WHERE id = $1', [id]);
+        if (checkResult.rows.length === 0) {
+            return res.status(404).json({
+                exito: false,
+                mensaje: `Producto con ID ${id} no encontrado`
+            });
+        }
+        
+        // Eliminar el producto (los detalles de pedidos se eliminarán en cascada)
+        await client.query('DELETE FROM productos WHERE id = $1', [id]);
+        
+        res.json({
+            exito: true,
+            mensaje: 'Producto eliminado correctamente'
+        });
+    } catch (error) {
+        console.error('Error al eliminar producto:', error);
+        res.status(500).json({
+            exito: false,
+            mensaje: 'Error al eliminar producto'
+        });
+    }
+});
+
+// 6. Guardar un pedido
 app.post('/api/pedidos', async (req, res) => {
     try {
         const { cliente, productos: productosPedido, total } = req.body;
@@ -253,6 +333,7 @@ app.post('/api/pedidos', async (req, res) => {
     }
 });
 
+// 7. Obtener todos los pedidos
 app.get('/api/pedidos', async (req, res) => {
     try {
         const result = await client.query(`
@@ -281,6 +362,7 @@ app.get('/api/pedidos', async (req, res) => {
     }
 });
 
+// 8. Ruta 404
 app.use((req, res) => {
     res.status(404).json({
         exito: false,
